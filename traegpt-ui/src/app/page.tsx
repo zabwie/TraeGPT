@@ -187,6 +187,11 @@ export default function Home() {
           method: "POST",
           body: form,
         });
+        
+        if (!res.ok) {
+          throw new Error(`Image analysis failed: ${res.status} ${res.statusText}`);
+        }
+        
         const result = await res.json();
         newMessages = [
           ...newMessages,
@@ -205,7 +210,8 @@ export default function Home() {
         setImage(null);
         if (fileInputRef.current) fileInputRef.current.value = "";
       } catch (e) {
-        setError("Image analysis failed.");
+        console.error('Image analysis error:', e);
+        setError(`Image analysis failed: ${e instanceof Error ? e.message : 'Unknown error'}`);
       }
       setLoading(false);
       return;
@@ -222,6 +228,11 @@ export default function Home() {
             ],
           }),
         });
+        
+        if (!res.ok) {
+          throw new Error(`Chat failed: ${res.status} ${res.statusText}`);
+        }
+        
         const data = await res.json();
         const assistantMessage: Message = { 
           role: "assistant" as const, 
@@ -269,7 +280,8 @@ export default function Home() {
           await saveChatSession(user.uid, updatedSession);
         }
       } catch (e) {
-        setError("Chat failed.");
+        console.error('Chat error:', e);
+        setError(`Chat failed: ${e instanceof Error ? e.message : 'Unknown error'}. Please check if your backend is running at ${API_BASE}`);
       }
     }
     setLoading(false);

@@ -5,6 +5,7 @@ import json
 import time
 import datetime
 import tempfile
+import numpy as np
 from typing import List, Optional
 from fastapi import FastAPI, File, UploadFile, Form, Request
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -20,6 +21,21 @@ from traegpt import (
     OLLAMA_URL
 )
 import requests
+
+# ========== UTILITY FUNCTIONS ==========
+def convert_numpy_types(obj):
+    """Convert NumPy types to native Python types for JSON serialization"""
+    if isinstance(obj, np.integer):
+        return int(obj)
+    elif isinstance(obj, np.floating):
+        return float(obj)
+    elif isinstance(obj, np.ndarray):
+        return obj.tolist()
+    elif isinstance(obj, dict):
+        return {key: convert_numpy_types(value) for key, value in obj.items()}
+    elif isinstance(obj, list):
+        return [convert_numpy_types(item) for item in obj]
+    return obj
 
 # ========== FASTAPI SETUP ==========
 app = FastAPI(title="TraeGPT API", description="Chat + Image Recognition API", version="1.0")
@@ -139,7 +155,7 @@ async def analyze_image(
         except Exception:
             pass
     
-    return JSONResponse(content=results)
+    return JSONResponse(content=convert_numpy_types(results))
 
 # ========== ROOT ENDPOINT ==========
 @app.get("/")
