@@ -1,6 +1,36 @@
 import { initializeApp } from 'firebase/app';
-import { getAuth, signInAnonymously, onAuthStateChanged, User } from 'firebase/auth';
-import { getFirestore, collection, doc, setDoc, getDoc, getDocs, query, where, orderBy, deleteDoc } from 'firebase/firestore';
+import { getAuth, signInAnonymously, User } from 'firebase/auth';
+import { getFirestore, collection, doc, setDoc, getDocs, query, orderBy, deleteDoc } from 'firebase/firestore';
+
+export interface Message {
+  role: 'user' | 'assistant';
+  content: string;
+  imageUrl?: string;
+  imageResult?: {
+    caption?: string;
+    object_detection?: Array<{
+      class: string;
+      confidence: number;
+    }>;
+    text_extraction?: Array<{
+      text: string;
+      confidence: number;
+    }>;
+    classification?: Array<{
+      class: string;
+      confidence: number;
+    }>;
+    analysis_time?: number;
+  };
+}
+
+export interface ChatSession {
+  id: string;
+  title: string;
+  messages: Message[];
+  createdAt: Date;
+  updatedAt: Date;
+}
 
 const firebaseConfig = {
   apiKey: "AIzaSyAIxQzSwBC1qD98vdt1hmJwAFYTYerYGsw",
@@ -18,14 +48,9 @@ export const auth = getAuth(app);
 export const db = getFirestore(app);
 
 // Authentication functions
-export const signInUser = async () => {
-  try {
-    const result = await signInAnonymously(auth);
-    return result.user;
-  } catch (error) {
-    console.error('Error signing in:', error);
-    throw error;
-  }
+export const signInUser = async (): Promise<User> => {
+  const result = await signInAnonymously(auth);
+  return result.user;
 };
 
 export const getCurrentUser = (): User | null => {
@@ -33,64 +58,41 @@ export const getCurrentUser = (): User | null => {
 };
 
 // Chat session functions
-export const saveChatSession = async (userId: string, session: any) => {
-  try {
-    const sessionRef = doc(db, 'users', userId, 'chatSessions', session.id);
-    await setDoc(sessionRef, {
-      ...session,
-      createdAt: session.createdAt.toISOString(),
-      updatedAt: session.updatedAt.toISOString()
-    });
-  } catch (error) {
-    console.error('Error saving chat session:', error);
-    throw error;
-  }
+export const saveChatSession = async (userId: string, session: ChatSession): Promise<void> => {
+  const sessionRef = doc(db, 'users', userId, 'chatSessions', session.id);
+  await setDoc(sessionRef, {
+    ...session,
+    createdAt: session.createdAt.toISOString(),
+    updatedAt: session.updatedAt.toISOString()
+  });
 };
 
-export const loadChatSessions = async (userId: string) => {
-  try {
-    const sessionsRef = collection(db, 'users', userId, 'chatSessions');
-    const q = query(sessionsRef, orderBy('updatedAt', 'desc'));
-    const querySnapshot = await getDocs(q);
-    
-    const sessions = querySnapshot.docs.map(doc => {
-      const data = doc.data();
-      return {
-        ...data,
-        createdAt: new Date(data.createdAt),
-        updatedAt: new Date(data.updatedAt)
-      };
-    });
-    
-    return sessions;
-  } catch (error) {
-    console.error('Error loading chat sessions:', error);
-    return [];
-  }
+export const loadChatSessions = async (userId: string): Promise<ChatSession[]> => {
+  const sessionsRef = collection(db, 'users', userId, 'chatSessions');
+  const q = query(sessionsRef, orderBy('updatedAt', 'desc'));
+  const querySnapshot = await getDocs(q);
+  return querySnapshot.docs.map(docSnap => {
+    const data = docSnap.data();
+    return {
+      ...data,
+      createdAt: new Date(data.createdAt),
+      updatedAt: new Date(data.updatedAt)
+    } as ChatSession;
+  });
 };
 
-export const deleteChatSession = async (userId: string, sessionId: string) => {
-  try {
-    const sessionRef = doc(db, 'users', userId, 'chatSessions', sessionId);
-    await deleteDoc(sessionRef);
-  } catch (error) {
-    console.error('Error deleting chat session:', error);
-    throw error;
-  }
+export const deleteChatSession = async (userId: string, sessionId: string): Promise<void> => {
+  const sessionRef = doc(db, 'users', userId, 'chatSessions', sessionId);
+  await deleteDoc(sessionRef);
 };
 
 // Training data functions
-export const saveTrainingData = async (userId: string, message: any) => {
-  try {
-    const trainingRef = doc(db, 'trainingData', `${userId}_${Date.now()}`);
-    await setDoc(trainingRef, {
-      userId,
-      message,
-      timestamp: new Date().toISOString(),
-      processed: false
-    });
-  } catch (error) {
-    console.error('Error saving training data:', error);
-    // Don't throw error for training data to avoid breaking user experience
-  }
+export const saveTrainingData = async (userId: string, message: Message): Promise<void> => {
+  const trainingRef = doc(db, 'trainingData', `${userId}_${Date.now()}`);
+  await setDoc(trainingRef, {
+    userId,
+    message,
+    timestamp: new Date().toISOString(),
+    processed: false
+  });
 }; 

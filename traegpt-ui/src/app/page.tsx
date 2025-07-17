@@ -1,23 +1,9 @@
 "use client";
 import React, { useRef, useState, useEffect } from "react";
 import ReactMarkdown from "react-markdown";
-import { auth, signInUser, getCurrentUser, saveChatSession, loadChatSessions, deleteChatSession, saveTrainingData } from './firebase';
+import Image from "next/image";
+import { auth, signInUser, saveChatSession, loadChatSessions, deleteChatSession as fbDeleteChatSession, saveTrainingData, Message, ChatSession } from './firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
-
-interface Message {
-  role: "user" | "assistant";
-  content: string;
-  imageUrl?: string;
-  imageResult?: any;
-}
-
-interface ChatSession {
-  id: string;
-  title: string;
-  messages: Message[];
-  createdAt: Date;
-  updatedAt: Date;
-}
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8000";
 
@@ -91,7 +77,7 @@ export default function Home() {
     if (chatContainerRef.current) {
       chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
     }
-  }, [messages, loading]);
+  }, [messages, loading, chatSessions]);
 
   // Auto-resize textarea
   React.useEffect(() => {
@@ -143,7 +129,7 @@ export default function Home() {
     if (!user) return;
     
     try {
-      await deleteChatSession(user.uid, sessionId);
+      await fbDeleteChatSession(user.uid, sessionId);
       setChatSessions(prev => prev.filter(s => s.id !== sessionId));
       if (currentSessionId === sessionId) {
         handleNewChat();
@@ -171,8 +157,7 @@ export default function Home() {
       // Save user message for training
       await saveTrainingData(user.uid, {
         role: "user",
-        content: input,
-        timestamp: new Date().toISOString()
+        content: input
       });
     }
     
@@ -243,8 +228,7 @@ export default function Home() {
         // Save assistant message for training
         await saveTrainingData(user.uid, {
           role: "assistant",
-          content: assistantMessage.content,
-          timestamp: new Date().toISOString()
+          content: assistantMessage.content
         });
         
         // Create or update chat session
@@ -306,7 +290,7 @@ export default function Home() {
       return (
         <div key={i} className="flex justify-end mb-4">
           <div className="max-w-xs">
-            <img src={msg.imageUrl} alt="uploaded" className="rounded-lg shadow-sm" />
+            <Image src={msg.imageUrl} alt="uploaded" width={320} height={240} className="rounded-lg shadow-sm" />
           </div>
         </div>
       );
@@ -319,13 +303,13 @@ export default function Home() {
             <h3 className="text-lg font-medium text-gray-100 mb-3">Image Analysis Results</h3>
             
             {/* Classification */}
-            {result.classification && Object.keys(result.classification).length > 0 && (
+            {result.classification && result.classification.length > 0 && (
               <div className="mb-4">
                 <h4 className="text-sm font-medium text-gray-300 mb-2">Classification:</h4>
                 <div className="flex flex-wrap gap-2">
-                  {Object.entries(result.classification).map(([category, confidence]) => (
-                    <span key={category} className="bg-blue-900 text-blue-200 px-2 py-1 rounded-full text-xs">
-                      {category}: {(confidence as number * 100).toFixed(1)}%
+                  {result.classification.map((item: { class: string; confidence: number }, idx: number) => (
+                    <span key={idx} className="bg-blue-900 text-blue-200 px-2 py-1 rounded-full text-xs">
+                      {item.class}: {(item.confidence * 100).toFixed(1)}%
                     </span>
                   ))}
                 </div>
@@ -337,7 +321,7 @@ export default function Home() {
               <div className="mb-4">
                 <h4 className="text-sm font-medium text-gray-300 mb-2">Objects Detected:</h4>
                 <div className="flex flex-wrap gap-2">
-                  {result.object_detection.map((obj: any, idx: number) => (
+                  {result.object_detection.map((obj: { class: string; confidence: number }, idx: number) => (
                     <span key={idx} className="bg-green-900 text-green-200 px-2 py-1 rounded-full text-xs">
                       {obj.class}: {(obj.confidence * 100).toFixed(1)}%
                     </span>
@@ -364,9 +348,9 @@ export default function Home() {
               <div className="mb-4">
                 <h4 className="text-sm font-medium text-gray-300 mb-2">Text Found:</h4>
                 <div className="bg-gray-700 p-3 rounded-lg">
-                  {result.text_extraction.map((text: any, idx: number) => (
+                  {result.text_extraction.map((text: { text: string; confidence: number }, idx: number) => (
                     <p key={idx} className="text-sm text-gray-200">
-                      "{text.text}" ({(text.confidence * 100).toFixed(1)}% confidence)
+                      &quot;{text.text}&quot; ({(text.confidence * 100).toFixed(1)}% confidence)
                     </p>
                   ))}
                 </div>
