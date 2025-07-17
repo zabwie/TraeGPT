@@ -1,6 +1,7 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, User } from 'firebase/auth';
 import { getFirestore, collection, doc, setDoc, getDocs, query, orderBy, deleteDoc } from 'firebase/firestore';
+import { getStorage, ref, uploadBytes, getDownloadURL } from "firebase/storage";
 
 export interface Message {
   role: 'user' | 'assistant';
@@ -54,6 +55,7 @@ try {
 
 export const auth = getAuth(app);
 export const db = getFirestore(app);
+export const storage = getStorage(app);
 
 // Authentication functions
 export const signInUser = async (): Promise<User> => {
@@ -74,8 +76,46 @@ export const getCurrentUser = (): User | null => {
 // Chat session functions
 export const saveChatSession = async (userId: string, session: ChatSession): Promise<void> => {
   const sessionRef = doc(db, 'users', userId, 'chatSessions', session.id);
+  // Deep clone and flatten any nested arrays in messages
+  const safeMessages = session.messages.map((msg) => {
+    const safeMsg: any = { ...msg };
+    if (msg.imageResult) {
+      safeMsg.imageResult = { ...msg.imageResult };
+      // Flatten classification
+      if (Array.isArray(msg.imageResult.classification)) {
+        safeMsg.imageResult.classification = msg.imageResult.classification.map((c: any) => ({ ...c }));
+      }
+      // Flatten object_detection
+      if (Array.isArray(msg.imageResult.object_detection)) {
+        safeMsg.imageResult.object_detection = msg.imageResult.object_detection.map((o: any) => ({ ...o }));
+      }
+      // Flatten text_extraction
+      if (Array.isArray(msg.imageResult.text_extraction)) {
+        safeMsg.imageResult.text_extraction = msg.imageResult.text_extraction.map((t: any) => ({ ...t }));
+      }
+      // Remove any nested arrays in bbox fields
+      if (safeMsg.imageResult.object_detection) {
+        safeMsg.imageResult.object_detection = safeMsg.imageResult.object_detection.map((o: any) => {
+          if (Array.isArray(o.bbox)) {
+            o.bbox = o.bbox.flat();
+          }
+          return o;
+        });
+      }
+      if (safeMsg.imageResult.text_extraction) {
+        safeMsg.imageResult.text_extraction = safeMsg.imageResult.text_extraction.map((t: any) => {
+          if (Array.isArray(t.bbox)) {
+            t.bbox = t.bbox.flat();
+          }
+          return t;
+        });
+      }
+    }
+    return safeMsg;
+  });
   await setDoc(sessionRef, {
     ...session,
+    messages: safeMessages,
     createdAt: session.createdAt.toISOString(),
     updatedAt: session.updatedAt.toISOString()
   });
@@ -109,4 +149,10 @@ export const saveTrainingData = async (userId: string, message: Message): Promis
     timestamp: new Date().toISOString(),
     processed: false
   });
-}; 
+};
+
+export async function uploadImageAndGetUrl(file: File, userId: string) {
+  const storageRef = ref(storage, `chat_images/${userId}/${Date.now()}_${file.name}`);
+  await uploadBytes(storageRef, file);
+  return await getDownloadURL(storageRef);
+} 
