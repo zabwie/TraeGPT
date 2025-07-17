@@ -121,20 +121,22 @@ export async function uploadImageAndGetUrl(file: File, userId: string) {
   return await getDownloadURL(storageRef);
 }
 
-function deepFlattenArray(arr: any[]): any[] {
-  return arr.reduce((acc, val) => 
-    Array.isArray(val) ? acc.concat(deepFlattenArray(val)) : acc.concat(val)
+function deepFlattenArray(arr: unknown[]): unknown[] {
+  return arr.reduce<unknown[]>((acc, val) =>
+    Array.isArray(val)
+      ? acc.concat(deepFlattenArray(val as unknown[]))
+      : acc.concat([val])
   , []);
 }
 
-function flattenNestedArrays(obj: any): any {
+function flattenNestedArrays(obj: unknown): unknown {
   if (Array.isArray(obj)) {
     // Recursively flatten all nested arrays
-    return deepFlattenArray(obj.map(flattenNestedArrays));
+    return deepFlattenArray((obj as unknown[]).map(flattenNestedArrays));
   } else if (typeof obj === 'object' && obj !== null) {
-    const newObj: any = {};
-    for (const key in obj) {
-      newObj[key] = flattenNestedArrays(obj[key]);
+    const newObj: Record<string, unknown> = {};
+    for (const key in obj as Record<string, unknown>) {
+      newObj[key] = flattenNestedArrays((obj as Record<string, unknown>)[key]);
     }
     return newObj;
   }

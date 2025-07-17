@@ -2,7 +2,7 @@
 import React, { useRef, useState, useEffect } from "react";
 import ReactMarkdown from "react-markdown";
 import Image from "next/image";
-import { auth, signInUser, saveChatSession, loadChatSessions, deleteChatSession as fbDeleteChatSession, saveTrainingData, Message, ChatSession } from './firebase';
+import { auth, signInUser, saveChatSession, loadChatSessions, deleteChatSession as fbDeleteChatSession, saveTrainingData, Message, ChatSession, uploadImageAndGetUrl } from './firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8000";
@@ -165,59 +165,68 @@ export default function Home() {
     }
     
     if (image) {
-      const form = new FormData();
-      form.append("file", image);
-      form.append("languages", ocrLang);
-      if (categories) form.append("categories", categories);
-      form.append("analysis_type", "full");
       try {
-        const res = await fetch(`${API_BASE}/v1/image/analyze`, {
-          method: "POST",
-          body: form,
-        });
-        
-        if (!res.ok) {
-          throw new Error(`Image analysis failed: ${res.status} ${res.statusText}`);
-        }
-        
-        const result = await res.json();
-        // Compose a summary string for the AI
-        let summary = "Image analysis:";
-        if (result.classification && result.classification.length > 0) {
-          summary += ` Classification: ${result.classification.map((c: { class: string; confidence: number }) => c.class).join(", ")}.`;
-        }
-        if (result.object_detection && result.object_detection.length > 0) {
-          summary += ` Objects detected: ${result.object_detection.map((o: { class: string; confidence: number }) => o.class).join(", ")}.`;
-        }
-        if (result.caption) {
-          summary += ` Caption: ${result.caption}`;
-        }
-        if (result.text_extraction && result.text_extraction.length > 0) {
-          summary += ` Text found: ${result.text_extraction.map((t: { text: string; confidence: number }) => t.text).join(", ")}.`;
-        }
+        // 1. Upload image to Firebase Storage and get persistent URL
+        const imageUrl = await uploadImageAndGetUrl(image, user.uid);
+        // 2. Add the message with the persistent imageUrl
         newMessages = [
           ...newMessages,
           {
             role: "user",
-            content: "[Image uploaded]"
-            // Do NOT include imageUrl: imagePreviewUrl or blob URLs in chat history
-          },
-          {
-            role: "assistant",
-            content: summary,
-            imageResult: result,
+            content: "[Image uploaded]",
+            imageUrl,
           },
         ];
         setMessages(newMessages);
+        // 3. Send image to backend for analysis
+        const form = new FormData();
+        form.append("file", image);
+        form.append("languages", ocrLang);
+        if (categories) form.append("categories", categories);
+        form.append("analysis_type", "full");
+        try {
+          const res = await fetch(`${API_BASE}/v1/image/analyze`, {
+            method: "POST",
+            body: form,
+          });
+          if (!res.ok) {
+            throw new Error(`Image analysis failed: ${res.status} ${res.statusText}`);
+          }
+          const result = await res.json();
+          // Compose a summary string for the AI
+          let summary = "Image analysis:";
+          if (result.classification && result.classification.length > 0) {
+            summary += ` Classification: ${result.classification.map((c: { class: string; confidence: number }) => c.class).join(", ")}.`;
+          }
+          if (result.object_detection && result.object_detection.length > 0) {
+            summary += ` Objects detected: ${result.object_detection.map((o: { class: string; confidence: number }) => o.class).join(", ")}.`;
+          }
+          if (result.caption) {
+            summary += ` Caption: ${result.caption}`;
+          }
+          if (result.text_extraction && result.text_extraction.length > 0) {
+            summary += ` Text found: ${result.text_extraction.map((t: { text: string; confidence: number }) => t.text).join(", ")}.`;
+          }
+          setMessages((msgs) => [
+            ...msgs,
+            {
+              role: "assistant",
+              content: summary,
+              imageResult: result,
+            },
+          ]);
+        } catch (e) {
+          setError("Image analysis failed.");
+        }
         setImage(null);
         setImagePreviewUrl(null);
         if (fileInputRef.current) fileInputRef.current.value = "";
       } catch (e) {
-        console.error('Image analysis error:', e);
-        setError(`Image analysis failed: ${e instanceof Error ? e.message : 'Unknown error'}`);
+        console.error('Image upload error:', e);
+        setError(`Image upload failed: ${e instanceof Error ? e.message : 'Unknown error'}`);
+        setLoading(false);
+        return;
       }
-      setLoading(false);
-      return;
     }
     
     if (input.trim()) {
@@ -316,6 +325,7 @@ export default function Home() {
       );
     }
     if (msg.imageUrl) {
+      console.log("Rendering image with URL:", msg.imageUrl);
       return (
         <div key={i} className="flex justify-end mb-4">
           <div className="max-w-xs">

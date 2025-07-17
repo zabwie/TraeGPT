@@ -13,6 +13,10 @@ git+https://github.com/openai/CLIP.git
 
 # Transformers and BLIP for image captioning
 transformers
+peft
+datasets
+trl
+bitsandbytes
 accelerate
 
 # YOLOv8 for object detection

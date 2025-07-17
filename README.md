@@ -1,3 +1,64 @@
+# How to Start TraeGPT After a Reboot
+
+Follow these steps every time you restart your PC to get TraeGPT running and accessible from the internet:
+
+## 1. Activate Your Python Environment
+If you use conda:
+```
+conda activate <your-env-name>
+```
+Or if you use venv:
+```
+<your-venv-path>\Scripts\activate
+```
+
+## 2. Start the FastAPI Backend
+From your project root:
+```
+python traegpt_api.py
+```
+This will start the backend at http://localhost:8000
+
+## 3. Start ngrok to Expose Your Backend
+In a new terminal, run:
+```
+ngrok http 8000
+```
+Copy the HTTPS forwarding URL (e.g., `https://xxxxxx.ngrok-free.app`).
+
+## 4. Update Vercel Environment Variable
+- Go to your Vercel dashboard for your frontend project.
+- Set the environment variable:
+  - `NEXT_PUBLIC_API_BASE` = your ngrok URL (e.g., `https://xxxxxx.ngrok-free.app`)
+- Redeploy your frontend if needed.
+
+## 5. (Optional) Start the Frontend Locally
+If you want to run the frontend locally:
+```
+cd traegpt-ui
+npm run dev
+```
+
+---
+
+## Troubleshooting
+- If your friend can't access the app, make sure ngrok is running and the Vercel env variable is updated.
+- If you see CORS errors, check that your backend is running and not crashing.
+- If you change the ngrok URL, always update it in Vercel!
+
+---
+
+## Quick Checklist
+- [ ] Python environment activated
+- [ ] Backend running (`python traegpt_api.py`)
+- [ ] ngrok running and URL copied
+- [ ] Vercel env var updated to new ngrok URL
+- [ ] Frontend redeployed (if needed)
+
+---
+
+For more details, see the rest of this README below.
+
 # TraeGPT - Enhanced AI Assistant with Image Recognition
 
 A powerful AI assistant that combines natural language processing with advanced image recognition capabilities.
@@ -331,3 +392,24 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 ---
 
 **Note**: This system requires significant computational resources. For optimal performance, use a machine with at least 8GB RAM and a CUDA-compatible GPU.
+
+## QLoRA Fine-Tuning (4-bit, LoRA, for RTX 3060)
+
+### Install dependencies
+```
+pip install -r requirements.txt
+```
+
+### Dataset format
+Each line in your .jsonl file should look like:
+```
+{"prompt": "How do I become fearless?", "response": "Fear fades through consistent exposure..."}
+```
+
+### Run QLoRA Training
+```
+python qlora_train.py --data your_data.jsonl --output adapter_dir
+```
+
+- Keep dataset small (500–2000 samples) for 12GB VRAM.
+- Save only LoRA adapters for efficient storage and inference.
