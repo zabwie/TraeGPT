@@ -1,1 +1,25 @@
+# Core dependencies for image recognition
+torch
+torchvision
+ftfy
+regex
+tqdm
+pillow
+numpy
+opencv-python
 
+# CLIP for image classification
+git+https://github.com/openai/CLIP.git
+
+# Transformers and BLIP for image captioning
+transformers
+accelerate
+
+# YOLOv8 for object detection
+ultralytics
+
+# EasyOCR for text recognition
+easyocr
+
+# Additional utilities
+requests
