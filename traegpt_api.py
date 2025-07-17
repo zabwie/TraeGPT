@@ -7,18 +7,23 @@ import datetime
 import tempfile
 import numpy as np
 from typing import List, Optional
-from fastapi import FastAPI, File, UploadFile, Form, Request
+from fastapi import FastAPI, File, UploadFile, Form, Request, Body
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import uvicorn
+import traceback
 
 # Import the core logic from traegpt.py
 from traegpt import (
     ImageRecognitionSystem,
     SYSTEM_PROMPT,
     MODEL,
-    OLLAMA_URL
+    OLLAMA_URL,
+    duckduckgo_search_web,
+    google_search,
+    get_page_text,
+    openrouter_chat
 )
 import requests
 
@@ -83,39 +88,92 @@ class ChatCompletionResponse(BaseModel):
     model: str
     choices: List[ChatCompletionChoice]
 
+# ========== GLOBAL MEMORY ==========
+memory = {}
+
 # ========== CHAT ENDPOINT (OpenAI-compatible) ==========
 @app.post("/v1/chat/completions", response_model=ChatCompletionResponse)
 def chat_completions(request: ChatRequest):
-    # Compose prompt from messages
-    prompt = SYSTEM_PROMPT
-    for msg in request.messages:
-        if msg.role == "user":
-            prompt += f"User: {msg.content}\n"
-        elif msg.role == "assistant":
-            prompt += f"AI: {msg.content}\n"
-    prompt += "AI:"
-    # Call Ollama API (streaming off for now)
-    ollama_payload = {
-        "model": MODEL,
-        "prompt": prompt,
-        "stream": False
-    }
-    response = requests.post(OLLAMA_URL, json=ollama_payload, timeout=60)
-    response.raise_for_status()
-    data = response.json()
-    ai_response = data.get("response", "")
-    # Format OpenAI-style response
-    return ChatCompletionResponse(
-        id=f"chatcmpl-{int(time.time())}",
-        object="chat.completion",
-        created=int(time.time()),
-        model=MODEL,
-        choices=[ChatCompletionChoice(
-            index=0,
-            message=ChatMessage(role="assistant", content=ai_response),
-            finish_reason="stop"
-        )]
-    )
+    try:
+        # Check if user is asking about the last image
+        last_user_message = request.messages[-1].content.lower()
+        if any(phrase in last_user_message for phrase in ["last photo", "last image", "previous photo", "previous image"]):
+            if "last_image" in memory:
+                label = None
+                classification = memory["last_image"].get("classification")
+                if isinstance(classification, list) and len(classification) > 0:
+                    label = classification[0].get("class")
+                elif isinstance(classification, dict):
+                    label = classification.get("class")
+                else:
+                    objects = memory["last_image"].get("objects")
+                    if isinstance(objects, list) and len(objects) > 0:
+                        label = objects[0].get("class")
+                    elif isinstance(objects, dict):
+                        label = objects.get("class")
+                caption = memory["last_image"].get("caption")
+                if label or caption:
+                    response = f"It looks like: {label}." if label else ""
+                    if caption:
+                        response += f" Caption: {caption}"
+                else:
+                    response = "Sorry, I couldn't confidently recognize the image."
+                return ChatCompletionResponse(
+                    id=f"chatcmpl-{int(time.time())}",
+                    object="chat.completion",
+                    created=int(time.time()),
+                    model=MODEL,
+                    choices=[ChatCompletionChoice(
+                        index=0,
+                        message=ChatMessage(role="assistant", content=response),
+                        finish_reason="stop"
+                    )]
+                )
+            else:
+                response = "I don't remember the last image."
+                return ChatCompletionResponse(
+                    id=f"chatcmpl-{int(time.time())}",
+                    object="chat.completion",
+                    created=int(time.time()),
+                    model=MODEL,
+                    choices=[ChatCompletionChoice(
+                        index=0,
+                        message=ChatMessage(role="assistant", content=response),
+                        finish_reason="stop"
+                    )]
+                )
+        # Compose prompt from messages
+        prompt = SYSTEM_PROMPT
+        for msg in request.messages:
+            if msg.role == "user":
+                prompt += f"User: {msg.content}\n"
+            elif msg.role == "assistant":
+                prompt += f"AI: {msg.content}\n"
+        prompt += "AI:"
+        # Call OpenRouter API
+        kimi_result = openrouter_chat(prompt)
+        if not isinstance(kimi_result, dict):
+            raise ValueError(f"openrouter_chat did not return a dict: {repr(kimi_result)}")
+        if "choices" not in kimi_result or not kimi_result["choices"]:
+            raise ValueError(f"No choices in OpenRouter response: {json.dumps(kimi_result)}")
+        ai_response = kimi_result["choices"][0]["message"]["content"]
+        # Format OpenAI-style response
+        return ChatCompletionResponse(
+            id=f"chatcmpl-{int(time.time())}",
+            object="chat.completion",
+            created=int(time.time()),
+            model=MODEL,
+            choices=[ChatCompletionChoice(
+                index=0,
+                message=ChatMessage(role="assistant", content=ai_response),
+                finish_reason="stop"
+            )]
+        )
+    except Exception as e:
+        print("[Kimi API error]", e)
+        traceback.print_exc()
+        from fastapi.responses import JSONResponse
+        return JSONResponse(content={"error": str(e), "traceback": traceback.format_exc()}, status_code=500)
 
 # ========== IMAGE ANALYSIS ENDPOINT ==========
 @app.post("/v1/image/analyze")
@@ -150,6 +208,13 @@ async def analyze_image(
             results = {"image_path": temp_path, "text_extraction": system.extract_text(temp_path), "analysis_time": 0}
         else:
             results = {"error": "Invalid analysis_type"}
+        # Save results to memory for context
+        memory["last_image"] = {
+            "objects": results.get("object_detection"),
+            "caption": results.get("caption"),
+            "classification": results.get("classification"),
+            "text": results.get("text_extraction")
+        }
     except Exception as e:
         results = {"error": f"Analysis failed: {str(e)}"}
     finally:
@@ -160,6 +225,27 @@ async def analyze_image(
             pass
     
     return JSONResponse(content=convert_numpy_types(results))
+
+# ========== SEARCH ENDPOINT ==========
+@app.post("/v1/search")
+def web_search_api(query: str = Body(..., embed=True), num_results: int = Body(3, embed=True)):
+    # Try DuckDuckGo first
+    ddg_results = duckduckgo_search_web(query, num_results=num_results)
+    results = []
+    if ddg_results:
+        for r in ddg_results:
+            preview = get_page_text(r.get('href', ''), max_chars=200)
+            results.append({
+                "title": r.get('title', ''),
+                "url": r.get('href', ''),
+                "snippet": r.get('body', ''),
+                "preview": preview
+            })
+    else:
+        # Fallback to Google
+        google_results = google_search(query, num_results=num_results)
+        results.append({"google_results": google_results})
+    return JSONResponse(content=results)
 
 # ========== ROOT ENDPOINT ==========
 @app.get("/")

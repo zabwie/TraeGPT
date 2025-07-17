@@ -76,43 +76,7 @@ export const getCurrentUser = (): User | null => {
 // Chat session functions
 export const saveChatSession = async (userId: string, session: ChatSession): Promise<void> => {
   const sessionRef = doc(db, 'users', userId, 'chatSessions', session.id);
-  // Deep clone and flatten any nested arrays in messages
-  const safeMessages = session.messages.map((msg) => {
-    const safeMsg: any = { ...msg };
-    if (msg.imageResult) {
-      safeMsg.imageResult = { ...msg.imageResult };
-      // Flatten classification
-      if (Array.isArray(msg.imageResult.classification)) {
-        safeMsg.imageResult.classification = msg.imageResult.classification.map((c: any) => ({ ...c }));
-      }
-      // Flatten object_detection
-      if (Array.isArray(msg.imageResult.object_detection)) {
-        safeMsg.imageResult.object_detection = msg.imageResult.object_detection.map((o: any) => ({ ...o }));
-      }
-      // Flatten text_extraction
-      if (Array.isArray(msg.imageResult.text_extraction)) {
-        safeMsg.imageResult.text_extraction = msg.imageResult.text_extraction.map((t: any) => ({ ...t }));
-      }
-      // Remove any nested arrays in bbox fields
-      if (safeMsg.imageResult.object_detection) {
-        safeMsg.imageResult.object_detection = safeMsg.imageResult.object_detection.map((o: any) => {
-          if (Array.isArray(o.bbox)) {
-            o.bbox = o.bbox.flat();
-          }
-          return o;
-        });
-      }
-      if (safeMsg.imageResult.text_extraction) {
-        safeMsg.imageResult.text_extraction = safeMsg.imageResult.text_extraction.map((t: any) => {
-          if (Array.isArray(t.bbox)) {
-            t.bbox = t.bbox.flat();
-          }
-          return t;
-        });
-      }
-    }
-    return safeMsg;
-  });
+  const safeMessages = session.messages.map((msg) => flattenNestedArrays(msg));
   await setDoc(sessionRef, {
     ...session,
     messages: safeMessages,
@@ -155,4 +119,24 @@ export async function uploadImageAndGetUrl(file: File, userId: string) {
   const storageRef = ref(storage, `chat_images/${userId}/${Date.now()}_${file.name}`);
   await uploadBytes(storageRef, file);
   return await getDownloadURL(storageRef);
+}
+
+function deepFlattenArray(arr: any[]): any[] {
+  return arr.reduce((acc, val) => 
+    Array.isArray(val) ? acc.concat(deepFlattenArray(val)) : acc.concat(val)
+  , []);
+}
+
+function flattenNestedArrays(obj: any): any {
+  if (Array.isArray(obj)) {
+    // Recursively flatten all nested arrays
+    return deepFlattenArray(obj.map(flattenNestedArrays));
+  } else if (typeof obj === 'object' && obj !== null) {
+    const newObj: any = {};
+    for (const key in obj) {
+      newObj[key] = flattenNestedArrays(obj[key]);
+    }
+    return newObj;
+  }
+  return obj;
 } 
