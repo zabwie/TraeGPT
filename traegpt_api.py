@@ -35,7 +35,7 @@ def convert_numpy_types(obj):
         return {key: convert_numpy_types(value) for key, value in obj.items()}
     elif isinstance(obj, list):
         return [convert_numpy_types(item) for item in obj]
-    elif hasattr(obj, item):  # Handle numpy scalars
+    elif hasattr(obj, 'item'):  # Handle numpy scalars
         return obj.item()
     elif hasattr(obj, 'tolist'):  # Handle other numpy objects
         return obj.tolist()

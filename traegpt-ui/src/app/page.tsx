@@ -178,6 +178,20 @@ export default function Home() {
         }
         
         const result = await res.json();
+        // Compose a summary string for the AI
+        let summary = "Image analysis:";
+        if (result.classification && result.classification.length > 0) {
+          summary += ` Classification: ${result.classification.map((c: { class: string; confidence: number }) => c.class).join(", ")}.`;
+        }
+        if (result.object_detection && result.object_detection.length > 0) {
+          summary += ` Objects detected: ${result.object_detection.map((o: { class: string; confidence: number }) => o.class).join(", ")}.`;
+        }
+        if (result.caption) {
+          summary += ` Caption: ${result.caption}`;
+        }
+        if (result.text_extraction && result.text_extraction.length > 0) {
+          summary += ` Text found: ${result.text_extraction.map((t: { text: string; confidence: number }) => t.text).join(", ")}.`;
+        }
         newMessages = [
           ...newMessages,
           {
@@ -187,7 +201,7 @@ export default function Home() {
           },
           {
             role: "assistant",
-            content: "[Image analysis result]",
+            content: summary,
             imageResult: result,
           },
         ];
