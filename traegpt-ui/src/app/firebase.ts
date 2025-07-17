@@ -43,14 +43,28 @@ const firebaseConfig = {
 };
 
 // Initialize Firebase
-const app = initializeApp(firebaseConfig);
+let app;
+try {
+  app = initializeApp(firebaseConfig);
+} catch (error) {
+  console.error('Firebase initialization error:', error);
+  // Create a fallback config or handle the error
+  throw new Error('Firebase configuration error. Please check your Firebase project settings.');
+}
+
 export const auth = getAuth(app);
 export const db = getFirestore(app);
 
 // Authentication functions
 export const signInUser = async (): Promise<User> => {
-  const result = await signInAnonymously(auth);
-  return result.user;
+  try {
+    const result = await signInAnonymously(auth);
+    return result.user;
+  } catch (error) {
+    console.error('Firebase sign-in error:', error);
+    // If anonymous auth fails, we can try other methods or provide a fallback
+    throw new Error(`Authentication failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+  }
 };
 
 export const getCurrentUser = (): User | null => {

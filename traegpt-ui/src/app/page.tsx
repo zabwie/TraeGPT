@@ -77,7 +77,7 @@ export default function Home() {
     if (chatContainerRef.current) {
       chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
     }
-  }, [messages, loading, chatSessions]);
+  }, [messages, loading]);
 
   // Auto-resize textarea
   React.useEffect(() => {
