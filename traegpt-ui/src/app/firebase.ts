@@ -1,6 +1,6 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, User } from 'firebase/auth';
-import { getFirestore, collection, doc, setDoc, getDocs, query, orderBy, deleteDoc } from 'firebase/firestore';
+import { getFirestore, collection, doc, setDoc, getDocs, query, orderBy, deleteDoc, getDoc } from 'firebase/firestore';
 import { getStorage, ref, uploadBytes, getDownloadURL } from "firebase/storage";
 
 export interface Message {
@@ -23,6 +23,9 @@ export interface Message {
     }>;
     analysis_time?: number;
   };
+  fileUrl?: string;
+  fileName?: string;
+  fileType?: string;
 }
 
 export interface ChatSession {
@@ -31,6 +34,14 @@ export interface ChatSession {
   messages: Message[];
   createdAt: Date;
   updatedAt: Date;
+}
+
+// Define a type for user preferences
+export interface UserPreferences {
+  userName?: string;
+  userInterests?: string;
+  answerStyle?: string;
+  customPersonality?: string;
 }
 
 const firebaseConfig = {
@@ -120,6 +131,20 @@ export async function uploadImageAndGetUrl(file: File, userId: string) {
   await uploadBytes(storageRef, file);
   return await getDownloadURL(storageRef);
 }
+
+// User preferences functions
+// Save user preferences (personalization settings)
+export const saveUserPreferences = async (userId: string, prefs: UserPreferences): Promise<void> => {
+  const prefsRef = doc(db, 'users', userId, 'preferences', 'main');
+  await setDoc(prefsRef, prefs, { merge: true });
+};
+
+// Load user preferences
+export const loadUserPreferences = async (userId: string): Promise<UserPreferences> => {
+  const prefsRef = doc(db, 'users', userId, 'preferences', 'main');
+  const docSnap = await getDoc(prefsRef);
+  return docSnap.exists() ? (docSnap.data() as UserPreferences) : {};
+};
 
 function deepFlattenArray(arr: unknown[]): unknown[] {
   return arr.reduce<unknown[]>((acc, val) =>

@@ -312,7 +312,11 @@ def openrouter_chat(prompt):
         ]
     }
     response = requests.post(OPENROUTER_API_URL, headers=headers, json=data)
-    response.raise_for_status()
+    try:
+        response.raise_for_status()
+    except requests.exceptions.HTTPError as e:
+        print("OpenRouter error response:", response.text)
+        raise
     return response.json()
 
 # Example usage (uncomment to test):
