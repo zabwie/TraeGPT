@@ -4,7 +4,7 @@ import { getFirestore, collection, doc, setDoc, getDocs, query, orderBy, deleteD
 import { getStorage, ref, uploadBytes, getDownloadURL } from "firebase/storage";
 
 export interface Message {
-  role: 'user' | 'assistant';
+  role: 'user' | 'assistant' | 'system';
   content: string;
   imageUrl?: string;
   imageResult?: {

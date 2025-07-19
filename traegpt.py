@@ -29,8 +29,6 @@ from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 
 # ========== CONFIG ==========
-OLLAMA_URL = "http://localhost:11434/api/generate"
-MODEL = "HammerAI/mistral-nemo-uncensored"
 HISTORY_FILE = "chat_history.json"
 MAX_TURNS = 25
 SYSTEM_PROMPT = (
@@ -48,9 +46,8 @@ API_KEY = "AIzaSyAodUqbh5-_2NxYCiq7LIN0UceHygIeUaw"
 CSE_ID = "d384d627840d14bc2"
 
 load_dotenv()  # Load environment variables from .env
-OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
-OPENROUTER_API_URL = "https://openrouter.ai/api/v1/chat/completions"
-print("OPENROUTER_API_KEY loaded:", repr(OPENROUTER_API_KEY))
+TOGETHER_API_KEY = os.getenv("TOGETHER_API_KEY")
+TOGETHER_API_URL = os.getenv("TOGETHER_API_URL", "https://api.together.xyz/v1/chat/completions")
 
 # ========== UTILITY FUNCTIONS ==========
 def convert_numpy_types(obj):
@@ -299,28 +296,28 @@ def get_page_text(url, max_chars=1000):
     except Exception as e:
         return f"Couldn't fetch content: {e}"
 
-def openrouter_chat(prompt):
+def togetherai_chat(prompt):
     headers = {
-        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+        "Authorization": f"Bearer {TOGETHER_API_KEY}",
         "Content-Type": "application/json"
     }
     data = {
-        "model": "moonshotai/kimi-k2:free",
+        "model": "moonshotai/kimi-k2-instruct",
         "messages": [
             {"role": "system", "content": "You are Kimi, an AI assistant created by Moonshot AI."},
             {"role": "user", "content": prompt}
         ]
     }
-    response = requests.post(OPENROUTER_API_URL, headers=headers, json=data)
+    response = requests.post(TOGETHER_API_URL, headers=headers, json=data)
     try:
         response.raise_for_status()
     except requests.exceptions.HTTPError as e:
-        print("OpenRouter error response:", response.text)
+        print("TogetherAI error response:", response.text)
         raise
     return response.json()
 
 # Example usage (uncomment to test):
-# result = openrouter_chat("Hello, who are you?")
+# result = togetherai_chat("Hello, who are you?")
 # print(result)
 
 # ========== ARGPARSE ==========
@@ -346,7 +343,6 @@ Examples:
     parser.add_argument('--analysis-type', type=str, choices=['full', 'classification', 'detection', 'caption', 'ocr'], default='full', help='Type of analysis to perform (default: full)')
     parser.add_argument('--analyze-image', type=str, help='(Alias for --image)')
     parser.add_argument('--verbose', '-v', action='store_true', help='Enable verbose output')
-    parser.add_argument('--provider', type=str, choices=['openrouter'], default='openrouter', help='LLM provider to use (default: openrouter)')
     return parser.parse_args()
 
 # ========== HEADLESS MODE ==========
@@ -474,24 +470,15 @@ def chat():
         start_time = time.time()
         try:
             with session.post(
-                OLLAMA_URL,
-                json={"model": MODEL, "prompt": prompt, "stream": True},
-                stream=True, timeout=60
+                TOGETHER_API_URL,
+                json={"model": "moonshotai/kimi-k2-instruct", "messages": [{"role": "user", "content": prompt}]},
+                timeout=60
             ) as response:
                 response.raise_for_status()
+                data = response.json()
+                ai_output = data.get("choices", [{}])[0].get("message", {}).get("content", "")
                 print("AI: ", end="", flush=True)
-                ai_output = ""
-                for line in response.iter_lines():
-                    if not line:
-                        continue
-                    try:
-                        data = json.loads(line.decode('utf-8'))
-                        chunk = data.get("response", "")
-                        print(chunk, end="", flush=True)
-                        ai_output += chunk
-                    except Exception as e:
-                        print(f"\n[Stream error] {e}")
-                print()
+                print(ai_output)
         except Exception as e:
             print(f"[Error] {e}")
             continue

@@ -18,12 +18,10 @@ import traceback
 from traegpt import (
     ImageRecognitionSystem,
     SYSTEM_PROMPT,
-    MODEL,
-    OLLAMA_URL,
     duckduckgo_search_web,
     google_search,
     get_page_text,
-    openrouter_chat
+    togetherai_chat
 )
 import requests
 
@@ -122,7 +120,7 @@ def chat_completions(request: ChatRequest):
                     id=f"chatcmpl-{int(time.time())}",
                     object="chat.completion",
                     created=int(time.time()),
-                    model=MODEL,
+                    model="moonshotai/kimi-k2-instruct",
                     choices=[ChatCompletionChoice(
                         index=0,
                         message=ChatMessage(role="assistant", content=response),
@@ -135,7 +133,7 @@ def chat_completions(request: ChatRequest):
                     id=f"chatcmpl-{int(time.time())}",
                     object="chat.completion",
                     created=int(time.time()),
-                    model=MODEL,
+                    model="moonshotai/kimi-k2-instruct",
                     choices=[ChatCompletionChoice(
                         index=0,
                         message=ChatMessage(role="assistant", content=response),
@@ -150,19 +148,19 @@ def chat_completions(request: ChatRequest):
             elif msg.role == "assistant":
                 prompt += f"AI: {msg.content}\n"
         prompt += "AI:"
-        # Call OpenRouter API
-        kimi_result = openrouter_chat(prompt)
+        # Call TogetherAI API
+        kimi_result = togetherai_chat(prompt)
         if not isinstance(kimi_result, dict):
-            raise ValueError(f"openrouter_chat did not return a dict: {repr(kimi_result)}")
+            raise ValueError(f"togetherai_chat did not return a dict: {repr(kimi_result)}")
         if "choices" not in kimi_result or not kimi_result["choices"]:
-            raise ValueError(f"No choices in OpenRouter response: {json.dumps(kimi_result)}")
+            raise ValueError(f"No choices in TogetherAI response: {json.dumps(kimi_result)}")
         ai_response = kimi_result["choices"][0]["message"]["content"]
         # Format OpenAI-style response
         return ChatCompletionResponse(
             id=f"chatcmpl-{int(time.time())}",
             object="chat.completion",
             created=int(time.time()),
-            model=MODEL,
+            model="moonshotai/kimi-k2-instruct",
             choices=[ChatCompletionChoice(
                 index=0,
                 message=ChatMessage(role="assistant", content=ai_response),

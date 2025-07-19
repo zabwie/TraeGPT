@@ -2,13 +2,70 @@
 import React, { useRef, useState, useEffect } from "react";
 import ReactMarkdown from "react-markdown";
 import Image from "next/image";
-import { auth, signInUser, saveChatSession, loadChatSessions, deleteChatSession as fbDeleteChatSession, saveTrainingData, Message, ChatSession, uploadImageAndGetUrl, saveUserPreferences, loadUserPreferences } from './firebase';
+import { auth, signInUser, saveChatSession, loadChatSessions, deleteChatSession as fbDeleteChatSession, Message, ChatSession, uploadImageAndGetUrl, saveUserPreferences, loadUserPreferences } from './firebase';
 import { onAuthStateChanged, User } from 'firebase/auth';
 import { motion, AnimatePresence } from "framer-motion";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8000";
+// Language detection function
+function detectLanguage(code: string): string {
+  const firstLine = code.trim().split('\n')[0].toLowerCase();
+  
+  if (firstLine.includes('import ') || firstLine.includes('from ') || firstLine.includes('def ') || firstLine.includes('class ')) return 'python';
+  if (firstLine.includes('function ') || firstLine.includes('const ') || firstLine.includes('let ') || firstLine.includes('var ')) return 'javascript';
+  if (firstLine.includes('public class') || firstLine.includes('private ') || firstLine.includes('public ')) return 'java';
+  if (firstLine.includes('<?php') || firstLine.includes('$')) return 'php';
+  if (firstLine.includes('package ') || firstLine.includes('import "') || firstLine.includes('func ')) return 'go';
+  if (firstLine.includes('fn ') || firstLine.includes('let ') || firstLine.includes('struct ')) return 'rust';
+  if (firstLine.includes('using ') || firstLine.includes('namespace ') || firstLine.includes('public class')) return 'csharp';
+  if (firstLine.includes('html') || firstLine.includes('<!DOCTYPE')) return 'html';
+  if (firstLine.includes('css') || firstLine.includes('{') && firstLine.includes(':')) return 'css';
+  if (firstLine.includes('sql') || firstLine.includes('SELECT') || firstLine.includes('INSERT')) return 'sql';
+  if (firstLine.includes('dockerfile') || firstLine.includes('FROM ') || firstLine.includes('RUN ')) return 'dockerfile';
+  if (firstLine.includes('yaml') || firstLine.includes('---')) return 'yaml';
+  if (firstLine.includes('json') || firstLine.includes('{') && firstLine.includes('"')) return 'json';
+  
+  return 'text';
+}
 
-function Typewriter({ text }: { text: string }) {
+// Custom CodeBlock component
+function CodeBlock({ children, className }: { children: string, className?: string }) {
+  const language = className?.replace('language-', '') || detectLanguage(children);
+  
+  const copyToClipboard = () => {
+    navigator.clipboard.writeText(children);
+  };
+  
+  return (
+    <div className="code-block">
+      <div className="code-header">
+        <span className="code-language">{language}</span>
+        <div className="code-actions">
+          <button className="code-action-btn" onClick={copyToClipboard}>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+            </svg>
+            Copy
+          </button>
+          <button className="code-action-btn">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+              <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
+            </svg>
+            Edit
+          </button>
+        </div>
+      </div>
+      <div className="code-content">
+        <pre style={{ margin: 0, padding: 0, background: 'none', color: 'inherit' }}>
+          <code>{children}</code>
+        </pre>
+      </div>
+    </div>
+  );
+}
+
+function TypewriterMarkdown({ text }: { text: string }) {
   const [displayed, setDisplayed] = useState("");
   useEffect(() => {
     setDisplayed("");
@@ -21,13 +78,56 @@ function Typewriter({ text }: { text: string }) {
     }, 14);
     return () => clearInterval(interval);
   }, [text]);
-  return <span>{displayed}</span>;
+  return (
+    <div style={{ 
+      whiteSpace: 'pre-wrap',
+      fontFamily: 'monospace',
+      lineHeight: '1.6',
+      wordBreak: 'break-word'
+    }}>
+      <ReactMarkdown 
+        components={{
+          pre: ({ children }) => <>{children}</>,
+          code: ({ inline, className, children }: { inline?: boolean; className?: string; children?: React.ReactNode }) => {
+            return !inline ? (
+              <CodeBlock className={className}>
+                {String(children || '').replace(/\n$/, '')}
+              </CodeBlock>
+            ) : (
+              <code className={className}>
+                {children}
+              </code>
+            );
+          }
+        }}
+      >
+        {displayed}
+      </ReactMarkdown>
+    </div>
+  );
+}
+
+// Add a helper function for timeout
+function fetchWithTimeout(resource: RequestInfo, options: RequestInit = {}, timeout = 15000): Promise<Response> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('Request timed out')), timeout);
+    fetch(resource, options)
+      .then((response) => {
+        clearTimeout(timer);
+        resolve(response);
+      })
+      .catch((err) => {
+        clearTimeout(timer);
+        reject(err);
+      });
+  });
 }
 
 export default function Home() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [responseTime, setResponseTime] = useState<number | null>(null);
   const [image, setImage] = useState<File | null>(null);
   const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
   const [ocrLang, setOcrLang] = useState("en");
@@ -57,6 +157,12 @@ export default function Home() {
   const [savedCustomPersonality, setSavedCustomPersonality] = useState("");
   // Add loading state for preferences
   const [prefsLoading, setPrefsLoading] = useState(false);
+  // Add debounce ref for Firebase saves
+  const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  // Add state to track web search
+  const [isWebSearching, setIsWebSearching] = useState(false);
+  // Add ref to track current chat sessions to avoid infinite loops
+  const chatSessionsRef = useRef<ChatSession[]>([]);
 
   // Handle authentication state
   useEffect(() => {
@@ -68,6 +174,7 @@ export default function Home() {
         // Load chat sessions for authenticated user
         const sessions = await loadChatSessions(user.uid);
         setChatSessions(sessions as ChatSession[]);
+        chatSessionsRef.current = sessions as ChatSession[];
       }
     });
 
@@ -81,10 +188,10 @@ export default function Home() {
     }
   }, [authLoading, user]);
 
-  // Update current session when messages change
+  // Update current session when messages change - with debounced save
   useEffect(() => {
     if (currentSessionId && messages.length > 0 && user) {
-      const updatedSession = chatSessions.find(s => s.id === currentSessionId);
+      const updatedSession = chatSessionsRef.current.find(s => s.id === currentSessionId);
       if (updatedSession) {
         const newSession = { 
           ...updatedSession, 
@@ -93,15 +200,37 @@ export default function Home() {
           updatedAt: new Date() 
         };
         
-        // Update local state
-        setChatSessions(prev => prev.map(session => 
-          session.id === currentSessionId ? newSession : session
-        ));
+        // Update local state immediately
+        setChatSessions(prev => {
+          const updated = prev.map(session => 
+            session.id === currentSessionId ? newSession : session
+          );
+          chatSessionsRef.current = updated;
+          return updated;
+        });
         
-        // Save to Firebase
-        saveChatSession(user.uid, newSession).catch(console.error);
+        // Debounce Firebase save to prevent overwhelming the database
+        if (saveTimeoutRef.current) {
+          clearTimeout(saveTimeoutRef.current);
+        }
+        
+        saveTimeoutRef.current = setTimeout(async () => {
+          try {
+            await saveChatSession(user.uid, newSession);
+          } catch (error) {
+            console.error('[Firebase] Error saving chat session:', error);
+            // Don't show error to user for background saves
+          }
+        }, 2000); // Wait 2 seconds before saving to Firebase
       }
     }
+    
+    // Cleanup timeout on unmount
+    return () => {
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+      }
+    };
   }, [messages, currentSessionId, user]);
 
   // Load preferences on login
@@ -122,10 +251,17 @@ export default function Home() {
     }
   }, [user]);
 
-  React.useEffect(() => {
-    // Scroll to bottom on new message
-    if (chatContainerRef.current) {
-      chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
+  // Replace the scroll-to-bottom effect with a smart scroll that only scrolls if the user is near the bottom
+  useEffect(() => {
+    if (!chatContainerRef.current) return;
+    const container = chatContainerRef.current;
+    const threshold = 120;
+    const isNearBottom =
+      container.scrollHeight - container.scrollTop - container.clientHeight < threshold;
+    if (isNearBottom) {
+      requestAnimationFrame(() => {
+        container.scrollTop = container.scrollHeight;
+      });
     }
   }, [messages, loading]);
 
@@ -176,13 +312,16 @@ export default function Home() {
     }
   }
 
-  async function handleDeleteChatSession(sessionId: string, e: React.MouseEvent) {
-    e.stopPropagation();
+  async function handleDeleteChatSession(sessionId: string) {
     if (!user) return;
     
     try {
       await fbDeleteChatSession(user.uid, sessionId);
-      setChatSessions(prev => prev.filter(s => s.id !== sessionId));
+      setChatSessions(prev => {
+        const updated = prev.filter(s => s.id !== sessionId);
+        chatSessionsRef.current = updated;
+        return updated;
+      });
       if (currentSessionId === sessionId) {
         handleNewChat();
       }
@@ -199,196 +338,442 @@ export default function Home() {
     setSavedUserInterests(userInterests);
     setSavedAnswerStyle(answerStyle);
     setSavedCustomPersonality(customPersonality);
-    await saveUserPreferences(user.uid, {
-      userName,
-      userInterests,
-      answerStyle,
-      customPersonality
-    });
-    setTimeout(() => setSettingsSaved(false), 1500);
+    try {
+      await saveUserPreferences(user.uid, {
+        userName,
+        userInterests,
+        answerStyle,
+        customPersonality
+      });
+      setTimeout(() => setSettingsSaved(false), 1500);
+    } catch (error) {
+      console.error('[Firebase] Error saving preferences:', error);
+      setError("Failed to save preferences. Please try again.");
+      setTimeout(() => setSettingsSaved(false), 1500);
+    }
   }
 
   function buildSystemPrompt() {
-    let prompt = "You are an AI assistant.";
-    if (savedUserName) prompt += ` The user's name is ${savedUserName}. Greet them by name when possible.`;
-    if (savedUserInterests) prompt += ` The user is interested in: ${savedUserInterests}. You can reference these topics in your answers.`;
+    let prompt = "You are Trae, an empathetic AI assistant created by Zabi. Respond as Trae, never as other models.";
+    
+    prompt += "\n\nCRITICAL FORMATTING REQUIREMENTS: You MUST format ALL responses beautifully with proper structure and indentation. The browser now preserves whitespace perfectly, so use this to your advantage:";
+    prompt += "\n• **Bold text** for important terms, names, and key information";
+    prompt += "\n• Bullet points (•) for lists and features";
+    prompt += "\n• Numbered lists (1., 2., 3.) for steps or sequential info";
+    prompt += "\n• **HEADERS**: Use # ## ### for different font sizes and hierarchy";
+    prompt += "\n• **PERFECT SPACING**: Use blank lines between sections to create visual breathing room";
+    prompt += "\n• **ADVANCED INDENTATION**: Use multiple levels with arrows and hanging indents";
+    prompt += "\n    → First level: 4 spaces";
+    prompt += "\n        → Second level: 8 spaces";
+    prompt += "\n            → Third level: 12 spaces";
+    prompt += "\n                → Fourth level: 16 spaces";
+    prompt += "\n• **HANGING INDENTS**: When text wraps, align with the start of the first line";
+    prompt += "\n• **ARROW INDICATORS**: Use → for sub-points and variations";
+    prompt += "\n• **MANDATORY SPACING**: Always add blank lines between sections to prevent compression";
+    prompt += "\n• **SECTION BREAKS**: Use double line breaks between major sections";
+    prompt += "\n• **VISUAL HIERARCHY**: Use bigger headings and more indentation to make text stand out";
+    prompt += "\n• **CODE INTEGRATION**: Include code snippets with proper syntax highlighting";
+    prompt += "\n• **METADATA**: Add social media metrics and technical details";
+    prompt += "\n• **MONOSPACE FRIENDLY**: Since we use monospace font, align things perfectly";
+    prompt += "\n• **FONT SIZES**: Use # for main titles, ## for sections, ### for subsections";
+    prompt += "\n• **EMPHASIS**: Use ***italic bold*** for extra emphasis";
+    prompt += "\n• **QUOTES**: Use > for important callouts and tips";
+    prompt += "\n• **CODE BLOCKS**: Always use proper code blocks with language detection";
+    prompt += "\n• **PRECISE INDENTATION**: Code languages are strict with indentation - be exact";
+    prompt += "\n• **LANGUAGE DETECTION**: The system will automatically detect Python, JavaScript, CSS, HTML, SQL, etc.";
+    prompt += "\n• **POEM FORMATTING**: For poems, use clean minimalist formatting:";
+    prompt += "\n    → Start with a simple introduction line";
+    prompt += "\n    → Add a thin separator line (---)";
+    prompt += "\n    → Use **bold** for the title";
+    prompt += "\n    → Separate stanzas with empty lines (double line breaks)";
+    prompt += "\n    → Keep lines short and left-aligned";
+    prompt += "\n    → No excessive formatting, just clean text";
+    prompt += "\n    → NO ARROWS (→) in poems - keep it clean and simple";
+    
+    prompt += "\n\nEXAMPLE FORMAT WITH PERFECT SPACING:";
+    prompt += "\n# **3 Essential Tools for Your Coding Life**";
+    prompt += "\n\n## **Quick Setup Tools**";
+    prompt += "\n\n• **VS Code** – Your daily driver for **code editing**";
+    prompt += "\n    → Extensions: **Prettier**, **GitLens**, **Live Share**";
+    prompt += "\n    → Pro tip: Enable **Zen Mode** for deep focus";
+    prompt += "\n\n• **GitHub Desktop** – When CLI feels too heavy";
+    prompt += "\n    → Drag-and-drop commits";
+    prompt += "\n    → Visual diff viewer";
+    prompt += "\n    → Push without touching terminal";
+    prompt += "\n\n• **Postman** – **API testing** made simple";
+    prompt += "\n    → Save requests as collections";
+    prompt += "\n    → Test auth flows";
+    prompt += "\n    → Share with your team";
+    prompt += "\n\n## **Use them in this order:**";
+    prompt += "\n\n    **VS Code** for writing";
+    prompt += "\n    **GitHub Desktop** for versioning";
+    prompt += "\n    **Postman** for testing";
+    prompt += "\n\n> **Pro tip:** Takes 10 minutes to set up all three.";
+    prompt += "\n\n**Example Python code with precise indentation:**";
+    prompt += "\n```python";
+    prompt += "\nimport requests";
+    prompt += "\n";
+    prompt += "\nAPI_KEY = 'your_api_key_here'";
+    prompt += "\nCX = 'your_search_engine_id_here'";
+    prompt += "\nquery = 'test search'";
+    prompt += "\nurl = f'https://www.googleapis.com/customsearch/v1?key={API_KEY}&cx={CX}&q={query}'";
+    prompt += "\n";
+    prompt += "\nresponse = requests.get(url)";
+    prompt += "\nprint(response.json())";
+    prompt += "\n```";
+    prompt += "\n\n**Example poem with clean formatting:**";
+    prompt += "\n**Moonlight Sonata**";
+    prompt += "\n---";
+    prompt += "\n\nA silver thread of moonlight";
+    prompt += "\nslips through the open window";
+    prompt += "\npooling like liquid memory";
+    prompt += "\nacross the wooden floor";
+    prompt += "\n\nIt carries the scent of **rain-soaked earth**";
+    prompt += "\nand the distant echo";
+    prompt += "\nof laughter from another life";
+    prompt += "\nwhen we were infinite";
+    prompt += "\n\nThe clock ticks its **ancient rhythm**";
+    prompt += "\nmarking time in heartbeats";
+    prompt += "\nwhile shadows dance";
+    prompt += "\nwith the grace of forgotten dreams";
+    prompt += "\n\nIn this **quiet cathedral of night**";
+    prompt += "\nwhere every breath is a prayer";
+    prompt += "\nand every thought a confession";
+    prompt += "\nI find you still";
+    
+    prompt += "\n\nIMPORTANT: You have access to web search capabilities. When users ask about current events, recent information, or anything that might require up-to-date data, you should automatically search the web to provide accurate information. Do not mention that you're searching - just do it seamlessly and provide the information naturally.";
+    
+    prompt += "\n\nTo search the web, include this special format in your response: [WEB_SEARCH:query]. For example: [WEB_SEARCH:latest iPhone release date] or [WEB_SEARCH:current weather in New York]. The search will happen automatically and you'll receive the results to respond with.";
+    
+    if (savedUserName) prompt += ` User's name: ${savedUserName}.`;
+    if (savedUserInterests) prompt += ` Interests: ${savedUserInterests}.`;
     if (savedAnswerStyle) {
-      if (savedAnswerStyle === 'friendly') prompt += " Respond in a friendly, conversational tone.";
-      if (savedAnswerStyle === 'formal') prompt += " Respond in a formal, professional tone.";
-      if (savedAnswerStyle === 'concise') prompt += " Respond concisely, using as few words as possible.";
-      if (savedAnswerStyle === 'detailed') prompt += " Respond with detailed, thorough explanations.";
+      const styleMap = {
+        'friendly': 'Be conversational and warm.',
+        'formal': 'Be professional and formal.',
+        'concise': 'Be brief and to the point.',
+        'detailed': 'Provide thorough explanations.'
+      };
+      prompt += ` ${styleMap[savedAnswerStyle as keyof typeof styleMap] || ''}`;
     }
     if (savedCustomPersonality) prompt += ` ${savedCustomPersonality}`;
+    
     return prompt;
   }
 
   async function sendMessage() {
-    if (!input.trim() && !image) return;
-    if (!user) return;
-    
-    setLoading(true);
-    setError(null);
-    
-    let newMessages = [...messages];
-    if (input.trim()) {
-      const userMessage = { role: "user" as const, content: input };
-      newMessages.push(userMessage);
-      setMessages(newMessages);
-      setInput("");
-      
-      // Save user message for training
-      await saveTrainingData(user.uid, {
-        role: "user",
-        content: input
-      });
-    }
-    
-    if (image) {
-      try {
-        // 1. Upload image to Firebase Storage and get persistent URL
-        const imageUrl = await uploadImageAndGetUrl(image, user.uid);
-        // 2. Add the message with the persistent imageUrl
-        newMessages = [
-          ...newMessages,
-          {
-            role: "user",
-            content: "[Image uploaded]",
-            imageUrl,
-          },
-        ];
-        setMessages(newMessages);
-        // 3. Send image to backend for analysis
-        const form = new FormData();
-        form.append("file", image);
-        form.append("languages", ocrLang);
-        if (categories) form.append("categories", categories);
-        form.append("analysis_type", "full");
-        try {
-          const res = await fetch(`${API_BASE}/v1/image/analyze`, {
-            method: "POST",
-            body: form,
-          });
-          if (!res.ok) {
-            throw new Error(`Image analysis failed: ${res.status} ${res.statusText}`);
-          }
-          const result = await res.json();
-          // Compose a summary string for the AI
-          let summary = "Image analysis:";
-          if (result.classification && result.classification.length > 0) {
-            summary += ` Classification: ${result.classification.map((c: { class: string; confidence: number }) => c.class).join(", ")}.`;
-          }
-          if (result.object_detection && result.object_detection.length > 0) {
-            summary += ` Objects detected: ${result.object_detection.map((o: { class: string; confidence: number }) => o.class).join(", ")}.`;
-          }
-          if (result.caption) {
-            summary += ` Caption: ${result.caption}`;
-          }
-          if (result.text_extraction && result.text_extraction.length > 0) {
-            summary += ` Text found: ${result.text_extraction.map((t: { text: string; confidence: number }) => t.text).join(", ")}.`;
-          }
-          setMessages((msgs) => [
-            ...msgs,
-            {
-              role: "assistant",
-              content: summary,
-              imageResult: result,
-            },
-          ]);
-        } catch (e) {
-          setError("Image analysis failed.");
-        }
-        setImage(null);
-        setImagePreviewUrl(null);
-        if (fileInputRef.current) fileInputRef.current.value = "";
-      } catch (e) {
-        console.error('Image upload error:', e);
-        setError(`Image upload failed: ${e instanceof Error ? e.message : 'Unknown error'}`);
-        setLoading(false);
+    console.log('[sendMessage] Function called');
+    try {
+      if (!input.trim() && !image) {
+        console.log('[sendMessage] No input or image, returning early');
         return;
       }
-    }
-    
-    if (input.trim()) {
-      try {
-        const TOGETHER_API_URL = process.env.NEXT_PUBLIC_TOGETHER_API_URL || "https://api.together.xyz/v1/chat/completions";
-        const TOGETHER_API_KEY = process.env.NEXT_PUBLIC_TOGETHER_API_KEY;
-        const res = await fetch(TOGETHER_API_URL, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "Authorization": `Bearer ${TOGETHER_API_KEY}`,
-          },
-          body: JSON.stringify({
-            model: "moonshotai/kimi-k2-instruct",
-            messages: [
-              { role: 'system', content: buildSystemPrompt() },
-              ...newMessages.map((m) => ({ role: m.role, content: m.content })),
-            ],
-          }),
-        });
-        
-        if (!res.ok) {
-          throw new Error(`Chat failed: ${res.status} ${res.statusText}`);
-        }
-        
-        const data = await res.json();
-        const assistantMessage: Message = { 
-          role: "assistant" as const, 
-          content: data.choices?.[0]?.message?.content || "[No response]" 
-        };
-        setMessages((msgs) => [...msgs, assistantMessage]);
-        
-        // Save assistant message for training
-        await saveTrainingData(user.uid, {
-          role: "assistant",
-          content: assistantMessage.content
-        });
-        
-        // Create or update chat session
-        const updatedMessages: Message[] = [...newMessages, assistantMessage];
-        if (!currentSessionId) {
-          // Create new session
-          const newSession: ChatSession = {
-            id: Date.now().toString(),
-            title: generateSessionTitle(updatedMessages),
-            messages: updatedMessages,
-            createdAt: new Date(),
-            updatedAt: new Date()
-          };
-          setChatSessions(prev => [newSession, ...prev]);
-          setCurrentSessionId(newSession.id);
-          
-          // Save to Firebase
-          await saveChatSession(user.uid, newSession);
-        } else {
-          // Update existing session
-          const updatedSession = {
-            ...chatSessions.find(s => s.id === currentSessionId)!,
-            messages: updatedMessages, 
-            title: generateSessionTitle(updatedMessages),
-            updatedAt: new Date() 
-          };
-          
-          setChatSessions(prev => prev.map(session => 
-            session.id === currentSessionId ? updatedSession : session
-          ));
-          
-          // Save to Firebase
-          await saveChatSession(user.uid, updatedSession);
-        }
-      } catch (e) {
-        console.error('Chat error:', e);
-        setError(`Chat failed: ${e instanceof Error ? e.message : 'Unknown error'}. Please check your TogetherAI API key and endpoint.`);
+      if (!user) {
+        console.log('[sendMessage] No user, returning early');
+        return;
       }
-    }
-    setLoading(false);
-  }
-
-  function handleImage(e: React.ChangeEvent<HTMLInputElement>) {
-    if (e.target.files && e.target.files[0]) {
-      setImage(e.target.files[0]);
-      setImagePreviewUrl(URL.createObjectURL(e.target.files[0]));
-      setShowPlusMenu(false);
+      
+      console.log('[sendMessage] Starting message processing...');
+      setLoading(true);
+      setError(null);
+      
+      let newMessages = [...messages];
+      let hasTextInput = false;
+      console.log('[sendMessage] Input trim result:', input.trim());
+      if (input.trim()) {
+        hasTextInput = true;
+        console.log('[sendMessage] Processing text input:', input.substring(0, 50) + '...');
+        const userMessage = { role: "user" as const, content: input };
+        console.log('[sendMessage] Created user message:', userMessage);
+        newMessages.push(userMessage);
+        setMessages(newMessages);
+        
+        setInput("");
+        
+        // Training data saving removed - Kimi is already well-trained
+        console.log('[sendMessage] Message processed, proceeding to AI...');
+      }
+      
+      if (image) {
+        console.log('[sendMessage] Processing image...');
+        try {
+          // 1. Upload image to Firebase Storage and get persistent URL
+          const imageUrl = await uploadImageAndGetUrl(image, user.uid);
+          // 2. Add the message with the persistent imageUrl
+          newMessages = [
+            ...newMessages,
+            {
+              role: "user",
+              content: "[Image uploaded]",
+              imageUrl,
+            },
+          ];
+          setMessages(newMessages);
+          
+          // 3. Send image to HuggingFace OWL-ViT for intelligent analysis
+          const form = new FormData();
+          form.append("file", image);
+          try {
+            console.log('[sendMessage] Sending image to HuggingFace OWL-ViT...');
+            const analyzeRes = await fetchWithTimeout("/api/image/analyze", { 
+              method: "POST", 
+              body: form 
+            }, 60000); // 60 seconds timeout for image analysis
+            
+            console.log('[sendMessage] Image analysis response status:', analyzeRes.status);
+            
+            if (!analyzeRes.ok) {
+              const errorText = await analyzeRes.text();
+              console.error('[sendMessage] Image analysis failed with status:', analyzeRes.status, 'error:', errorText);
+              throw new Error(`Image analysis failed: ${analyzeRes.status} - ${errorText}`);
+            }
+            
+            const analyzeData = await analyzeRes.json();
+            console.log('[sendMessage] Image analysis result:', analyzeData);
+            
+            // Create a user message with the image description
+            const imageDescription = analyzeData.description || "I can see various objects in this image.";
+            const userImageMessage = { 
+              role: "user" as const, 
+              content: imageDescription 
+            };
+            
+            // Add the image description as a user message
+            newMessages = [...newMessages, userImageMessage];
+            setMessages(newMessages);
+            
+            console.log('[sendMessage] Added image description to conversation:', imageDescription);
+            
+          } catch (e) {
+            console.error('[sendMessage] Image analysis error:', e);
+            const errorMessage = e instanceof Error ? e.message : 'Image analysis failed or timed out. Please try again.';
+            setError(errorMessage);
+            setLoading(false);
+            return;
+          }
+          
+          setImage(null);
+          setImagePreviewUrl(null);
+          if (fileInputRef.current) fileInputRef.current.value = "";
+        } catch (e) {
+          console.error('Image upload error:', e);
+          setError(`Image upload failed: ${e instanceof Error ? e.message : 'Unknown error'}`);
+          setLoading(false);
+          return;
+        }
+      }
+      
+      // Send to TogetherAI if we have text input OR if we just processed an image
+      const shouldSendToAI = hasTextInput || image;
+      console.log('[sendMessage] Should send to TogetherAI:', shouldSendToAI, 'hasTextInput:', hasTextInput, 'image:', !!image);
+      
+      if (shouldSendToAI) {
+        console.log('[sendMessage] Sending to TogetherAI...');
+        try {
+          console.log('[Chat] Sending message to TogetherAI...');
+          const start = Date.now();
+          const res = await fetchWithTimeout("/api/togetherai", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              messages: [
+                { role: 'system', content: buildSystemPrompt() },
+                ...newMessages.map((m) => ({ role: m.role, content: m.content })),
+              ],
+            }),
+          }, 60000); // 60 seconds timeout
+          const elapsed = Date.now() - start;
+          setResponseTime(elapsed);
+          console.log(`[Chat] TogetherAI response time: ${elapsed}ms`);
+          if (!res.ok) {
+            console.error(`[Chat] TogetherAI error: ${res.status} ${res.statusText}`);
+            throw new Error(`Chat failed: ${res.status} ${res.statusText}`);
+          }
+          const data = await res.json();
+          console.log('[Chat] TogetherAI response data:', data);
+          const assistantMessage: Message = { 
+            role: "assistant" as const, 
+            content: data.choices?.[0]?.message?.content || "[No response]" 
+          };
+          
+          // Check if the AI wants to search the web
+          const webSearchMatch = assistantMessage.content.match(/\[WEB_SEARCH:(.*?)\]/);
+          
+          if (webSearchMatch) {
+            const searchQuery = webSearchMatch[1].trim();
+            console.log('[Web Search] AI requested search for:', searchQuery);
+            setIsWebSearching(true); // Set web search flag
+            try {
+              // Perform the web search
+              const searchRes = await fetchWithTimeout("/api/search", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ query: searchQuery, numResults: 5 }),
+              }, 60000);
+              
+              if (!searchRes.ok) {
+                throw new Error("Web search failed");
+              }
+              
+              const searchData = await searchRes.json();
+              console.log('[Web Search] Search completed, results:', searchData.results.substring(0, 100) + '...');
+              
+              // Add the search results as a system message
+              const searchResultsMessage: Message = {
+                role: "system" as const,
+                content: searchData.results
+              };
+              
+              // Update messages with both the AI response and search results
+              const updatedMessages = [...newMessages, assistantMessage, searchResultsMessage];
+              setMessages(updatedMessages);
+              
+              // Add a delay to prevent rate limiting
+              await new Promise(resolve => setTimeout(resolve, 1000));
+              
+              // Now get the AI's final response with the search results
+              console.log('[Chat] Getting AI response with search results...');
+              const finalRes = await fetchWithTimeout("/api/togetherai", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  messages: [
+                    { role: 'system', content: buildSystemPrompt() },
+                    ...updatedMessages.map((m) => ({ role: m.role, content: m.content })),
+                  ],
+                }),
+              }, 60000);
+              
+              if (!finalRes.ok) {
+                if (finalRes.status === 429) {
+                  throw new Error("Rate limit exceeded. Please wait a moment and try again.");
+                }
+                throw new Error("Final AI response failed");
+              }
+              
+              const finalData = await finalRes.json();
+              const finalAssistantMessage: Message = {
+                role: "assistant" as const,
+                content: finalData.choices?.[0]?.message?.content || "[No response]"
+              };
+              
+              // Replace the messages with the final response
+              const finalMessages = [...newMessages, finalAssistantMessage];
+              setMessages(finalMessages);
+              
+              // Update chat session with final messages
+              if (!currentSessionId) {
+                const newSession: ChatSession = {
+                  id: Date.now().toString(),
+                  title: generateSessionTitle(finalMessages),
+                  messages: finalMessages,
+                  createdAt: new Date(),
+                  updatedAt: new Date()
+                };
+                setChatSessions(prev => {
+                  const updated = [newSession, ...prev];
+                  chatSessionsRef.current = updated;
+                  return updated;
+                });
+                setCurrentSessionId(newSession.id);
+                try {
+                  await saveChatSession(user.uid, newSession);
+                } catch (error) {
+                  console.error('[sendMessage] Error saving new chat session:', error);
+                }
+              } else {
+                const updatedSession = {
+                  ...chatSessionsRef.current.find(s => s.id === currentSessionId)!,
+                  messages: finalMessages,
+                  title: generateSessionTitle(finalMessages),
+                  updatedAt: new Date()
+                };
+                setChatSessions(prev => {
+                  const updated = prev.map(session => 
+                    session.id === currentSessionId ? updatedSession : session
+                  );
+                  chatSessionsRef.current = updated;
+                  return updated;
+                });
+              }
+              
+            } catch (searchError) {
+              console.error('[Web Search] Error:', searchError);
+              // If search fails, just show the original AI response
+              setMessages((msgs) => [...msgs, assistantMessage]);
+              if (searchError instanceof Error) {
+                setError(searchError.message);
+              }
+            } finally {
+              setIsWebSearching(false); // Reset web search flag
+            }
+          } else {
+            // No web search needed, just add the AI response
+            setMessages((msgs) => [...msgs, assistantMessage]);
+          }
+          
+          // Create or update chat session - with debounced save
+          const updatedMessages: Message[] = [...newMessages, assistantMessage];
+          if (!currentSessionId) {
+            // Create new session
+            const newSession: ChatSession = {
+              id: Date.now().toString(),
+              title: generateSessionTitle(updatedMessages),
+              messages: updatedMessages,
+              createdAt: new Date(),
+              updatedAt: new Date()
+            };
+            setChatSessions(prev => {
+              const updated = [newSession, ...prev];
+              chatSessionsRef.current = updated;
+              return updated;
+            });
+            setCurrentSessionId(newSession.id);
+            // Save to Firebase with error handling
+            try {
+              await saveChatSession(user.uid, newSession);
+            } catch (error) {
+              console.error('[sendMessage] Error saving new chat session:', error);
+              // Don't show error to user for background saves
+            }
+          } else {
+            // Update existing session - let the useEffect handle the save
+            const updatedSession = {
+              ...chatSessionsRef.current.find(s => s.id === currentSessionId)!,
+              messages: updatedMessages, 
+              title: generateSessionTitle(updatedMessages),
+              updatedAt: new Date() 
+            };
+            setChatSessions(prev => {
+              const updated = prev.map(session => 
+                session.id === currentSessionId ? updatedSession : session
+              );
+              chatSessionsRef.current = updated;
+              return updated;
+            });
+            // The useEffect will handle the debounced save
+          }
+          console.log('[Chat] Message handling complete.');
+        } catch (e) {
+          if (e instanceof Error && e.message === 'Request timed out') {
+            console.error('[Chat] TogetherAI request timed out.');
+            setError("AI response timed out. Please try again.");
+          } else {
+            console.error('[Chat] Error:', e);
+            setError(`Chat failed: ${e instanceof Error ? e.message : 'Unknown error'}.`);
+          }
+        }
+      } else {
+        console.log('[sendMessage] No text input and no image, not sending to TogetherAI');
+      }
+      console.log('[sendMessage] Function ending, setting loading to false');
+      setLoading(false);
+      // Clear response time after a few seconds
+      setTimeout(() => setResponseTime(null), 5000);
+    } catch (error) {
+      console.error('[sendMessage] Unexpected error:', error);
+      setError(`Unexpected error: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      setLoading(false);
     }
   }
 
@@ -532,11 +917,33 @@ export default function Home() {
     return (
       <div key={i} className={`message-row ${msg.role === "user" ? "user" : "assistant"}`}>
         <div className="chat-bubble">
-          <div className="prose prose-sm max-w-none prose-invert">
+          <div className="prose prose-sm max-w-none prose-invert" style={{ 
+            whiteSpace: 'pre-wrap',
+            fontFamily: 'monospace',
+            lineHeight: '1.6',
+            wordBreak: 'break-word'
+          }}>
             {isAssistant && isLatestAssistant ? (
-              <Typewriter text={msg.content} />
+              <TypewriterMarkdown text={msg.content} />
             ) : (
-              <ReactMarkdown>{msg.content}</ReactMarkdown>
+              <ReactMarkdown 
+                components={{
+                  pre: ({ children }) => <>{children}</>,
+                  code: ({ inline, className, children }: { inline?: boolean; className?: string; children?: React.ReactNode }) => {
+                    return !inline ? (
+                      <CodeBlock className={className}>
+                        {String(children || '').replace(/\n$/, '')}
+                      </CodeBlock>
+                    ) : (
+                      <code className={className}>
+                        {children}
+                      </code>
+                    );
+                  }
+                }}
+              >
+                {msg.content}
+              </ReactMarkdown>
             )}
           </div>
         </div>
@@ -556,7 +963,19 @@ export default function Home() {
     <div className="min-h-screen flex" style={{ background: 'var(--chat-bg)' }}>
       {/* Left Sidebar - Fixed */}
       {sidebarOpen && (
-        <div className="w-64 sidebar" style={{ background: 'var(--sidebar-bg)', borderRight: '1px solid var(--sidebar-border)', color: 'var(--text-main)' }}>
+        <div
+          className="w-64 sidebar"
+          style={{
+            position: 'fixed',
+            left: 0,
+            top: 0,
+            height: '100vh',
+            background: 'var(--sidebar-bg)',
+            borderRight: '1px solid var(--sidebar-border)',
+            color: 'var(--text-main)',
+            zIndex: 10
+          }}
+        >
           <div className="p-4" style={{ borderBottom: '1px solid var(--sidebar-border)' }}>
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2" style={{ color: 'var(--text-main)' }}>
@@ -602,7 +1021,7 @@ export default function Home() {
                     <span className="text-sm truncate">{session.title}</span>
                   </div>
                   <button
-                    onClick={(e) => handleDeleteChatSession(session.id, e)}
+                    onClick={() => handleDeleteChatSession(session.id)}
                     style={{ color: 'var(--text-secondary)' }}
                     className="opacity-0 group-hover:opacity-100 p-1 transition-all"
                   >
@@ -674,12 +1093,16 @@ export default function Home() {
                       <div style={{ background: 'var(--text-secondary)', animationDelay: '0.1s' }} className="w-2 h-2 rounded-full animate-bounce"></div>
                       <div style={{ background: 'var(--text-secondary)', animationDelay: '0.2s' }} className="w-2 h-2 rounded-full animate-bounce"></div>
                     </div>
-                    <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>AI is thinking...</span>
+                    <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+                      {isWebSearching ? "Searching the web..." : "AI is thinking..."}
+                      {responseTime && <span style={{ color: 'var(--text-success)' }}> ({responseTime}ms)</span>}
+                    </span>
                   </div>
                 </div>
               </div>
             )}
           </div>
+        </div>
 
           {/* Input Area - Fixed to Bottom */}
           <div style={{ background: 'var(--chat-bg)', borderTop: '1px solid var(--sidebar-border)' }} className="border-t border-gray-700 bg-gray-900 p-6 sticky bottom-0">
@@ -889,7 +1312,10 @@ export default function Home() {
                   </button>
                   
                   <button
-                    onClick={sendMessage}
+                    onClick={() => {
+                      console.log('[Send Button] Clicked');
+                      sendMessage();
+                    }}
                     disabled={loading || (!input.trim() && !image)}
                     className="p-2 bg-gray-600 text-white rounded-lg hover:bg-gray-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                     title="Send message"
@@ -900,7 +1326,10 @@ export default function Home() {
                   </button>
                 </div>
               </div>
-              
+                        {/* After the input bar's closing div, add the disclaimer below it */}
+                <div style={{ textAlign: 'center', color: 'var(--text-secondary)', fontSize: '0.95rem', margin: '8px 0 0 0', opacity: 0.8 }}>
+                    Note: For some reason it&apos;s a bit sensetive so if you send a message immediately after the AI, it will show an error. To prevent this, please wait 3-5 seconds.
+                </div>
               {imagePreviewUrl && (
                 <div className="mt-3 flex items-center gap-2 text-sm text-gray-400">
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -913,7 +1342,6 @@ export default function Home() {
             </div>
           </div>
         </div>
-      </div>
       
       {/* Hidden file input */}
       <input

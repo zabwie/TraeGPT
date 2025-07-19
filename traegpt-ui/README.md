@@ -1,3 +1,14 @@
+# TraeGPT UI (Open Source)
+
+**This repository is open-sourced as a portfolio and learning resource by Zabi (the creator).**
+
+- The frontend (this repo) is fully open source so others can learn, contribute, and use it as a reference for building modern AI chat UIs.
+- **The backend/API (FastAPI, image recognition, TogetherAI proxy, etc.) is private and not included in this repository.**
+- If you want to use this UI with your own backend, you can adapt the API endpoints or connect to your own services.
+- Contributions, feedback, and stars are welcome!
+
+---
+
 This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
 
 ## Getting Started
